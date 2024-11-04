@@ -206,32 +206,6 @@ How does a language model compress a document from a long number of letters to s
 
 
 
-## Language model call structure for this
 
-
-THIS SECTION IS NOT COMPLETE PLZ NO HATE
-
-If there is no memory write a new memory, else update memory to latest point
-Perform language model call $\phi(\mathcal{P},\mathcal{r}_{i})$ 
-
-Fix this, this ain't right at all. Use the logic from 16/3/23 and 24/3/23
-
-  ```pseudo
-    \begin{algorithm}
-    \caption{Personality Call}
-    \begin{algorithmic}
-      \Procedure{Personality}{$\mathcal{P}_{i},\mathcal{r}, \phi$}
-      \Procedure{Memory}{$\mathcal{M}$, database, $\mathcal{r}$}
-      \If{$\mathcal{M}_i$ is not present and updated}
-	      \State Write $\mathcal{M}_i$
-		      \State $\mathcal{M}_{S}$ = last $n$ entries 
-		      \State $\mathcal{M}_{L}$ = summary of conversation 
-		      \State $\mathcal{M}_{A}$ = database query for $\mathcal{r}$ 
-      \EndIf
-      \EndProcedure
-      \EndProcedure
-      \end{algorithmic}
-    \end{algorithm}  
-```
 
 

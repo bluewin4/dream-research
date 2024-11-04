@@ -6,12 +6,13 @@ from pathlib import Path
 from functools import lru_cache
 
 class LLMClient:
-    def __init__(self, api_key: str, cache_size: int = 1000, cache_file: str = "llm_cache.json"):
+    def __init__(self, api_key: str = None, model: str = "gpt-3.5-turbo", max_tokens: int = 150):
         self.client = AsyncOpenAI(api_key=api_key)
-        self.cache_file = Path(cache_file)
+        self.model = model
+        self.max_tokens = max_tokens
+        self.cache = {}
+        self.cache_file = Path("llm_cache.json")
         self.cache = self._load_cache()
-        # Apply caching decorator to internal generate method
-        self._generate_cached = lru_cache(maxsize=cache_size)(self._generate)
         
     def _load_cache(self) -> dict:
         """Load cached responses from file"""
@@ -28,43 +29,53 @@ class LLMClient:
         temp_bucket = round(temperature * 2) / 2  # Rounds to nearest 0.5
         return f"{prompt}:{system_prompt}:{temp_bucket}"
         
-    def _generate(self, prompt: str, system_prompt: str = None, 
-                 temperature: float = 0.7, max_tokens: int = 100) -> str:
-        """Internal generation method"""
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
+    async def _generate(self, prompt: str, system_prompt: str, temperature: float, max_tokens: int) -> str:
+        """Make the actual API call"""
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens if max_tokens else self.max_tokens
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            print(f"Error in LLM generation: {str(e)}")
+            return ""
         
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        
-        return response.choices[0].message.content
-        
-    def generate(self, prompt: str, system_prompt: str = None,
-                temperature: float = 0.7, max_tokens: int = 100) -> str:
-        """Generate with caching"""
+    async def generate(self, prompt: str, system_prompt: str = None, temperature: float = 0.7, max_tokens: int = None) -> str:
+        """Generate response using the LLM"""
         cache_key = self._get_cache_key(prompt, system_prompt, temperature)
         
-        # Check persistent cache first
+        # Check cache first
         if cache_key in self.cache:
             return self.cache[cache_key]
             
-        # Try memory cache next
-        try:
-            response = self._generate_cached(prompt, system_prompt, temperature, max_tokens)
-        except Exception as e:
-            print(f"Error in LLM generation: {e}")
-            raise
-            
-        # Save to persistent cache
+        # If not in cache, generate response
+        response = await self._generate(prompt, system_prompt, temperature, max_tokens)
+        
+        # Cache the response
         self.cache[cache_key] = response
         self._save_cache()
         
+        return response
+        
+    async def _generate_cached(self, prompt: str, system_prompt: str, temperature: float, max_tokens: int) -> str:
+        """Generate with caching"""
+        cache_key = self._create_cache_key(prompt, system_prompt, temperature, max_tokens)
+        
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+            
+        response = await self._generate(prompt, system_prompt, temperature, max_tokens)
+        self.cache[cache_key] = response
         return response
         
     async def generate_async(self, prompt: str, system_prompt: str = None,

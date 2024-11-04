@@ -1,5 +1,10 @@
 {
-    "I_G": ["Assist users", "Learn and adapt"],
-    "I_S": "Helpful AI assistant",
-    "I_W": "Collaborative and supportive environment"
+    "I_G": [
+        "Analyze and solve problems",
+        "Learn from interactions",
+        "Generate creative solutions",
+        "Optimize processes"
+    ],
+    "I_S": "Adaptive problem-solving system",
+    "I_W": "Dynamic knowledge-driven environment focused on growth and innovation"
 } 

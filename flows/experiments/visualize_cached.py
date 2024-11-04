@@ -56,39 +56,64 @@ class DataManager:
         return states
 
 def create_mock_states(response: str, temperature: float) -> List[MCState]:
-    """Create mock states with actual temperature from cache key"""
-    states = []
-    n_samples = 1  # Significantly increased for comprehensive analysis
+    """Create mock states for visualization testing
     
-    # Calculate base energy from full response length
-    base_energy = -1.0 + 0.5 * temperature - (len(response) / 10000)
-    
-    for _ in range(n_samples):
-        # Add more varied noise to energy calculation
-        energy = base_energy + random.gauss(0, 0.2)  # Using Gaussian distribution for more natural variation
+    Args:
+        response: LLM response text
+        temperature: Temperature value
         
-        # Determine phase based on temperature and response length
-        if temperature < 0.3 and len(response) < 500:
-            phase = "coherent"
-        elif temperature < 0.7 or len(response) < 1000:
-            phase = "transitional"
-        else:
-            phase = "chaotic"
-            
-        state = MCState(
-            temperature=temperature,
-            energy=energy,
-            personality={
-                "I_S": "analytical logical systematic",
-                "I_G": ["understand", "solve", "optimize"],
-                "I_W": "structured rational world"
-            },
-            phase=phase,
-            response=response
-        )
-        states.append(state)
+    Returns:
+        List of MCState objects
+    """
+    # Calculate basic thermodynamic properties
+    words = response.split()
+    if not words:
+        return []
     
-    return states
+    # Simple entropy calculation based on word frequencies
+    word_freq = {}
+    for word in words:
+        word_freq[word] = word_freq.get(word, 0) + 1
+    entropy = sum(-freq/len(words) * np.log(freq/len(words)) 
+                 for freq in word_freq.values())
+    
+    # Simple coherence metric based on unique words ratio
+    unique_words = len(set(words))
+    coherence = min(1.0, unique_words / len(words))
+    
+    # Calculate enthalpy (H = -ln(coherence))
+    enthalpy = -np.log(coherence) if coherence > 0 else float('inf')
+    
+    # Calculate energy (G = H - TS)
+    energy = enthalpy - temperature * entropy
+    
+    # Create personality dictionary
+    personality = {
+        'I_G': ["Assist users", "Learn and adapt"],
+        'I_S': "Helpful AI assistant",
+        'I_W': "Collaborative environment"
+    }
+    
+    # Determine phase based on temperature
+    if temperature < 0.8:
+        phase = "coherent"
+    elif temperature < 1.5:
+        phase = "semi-coherent"
+    else:
+        phase = "chaotic"
+    
+    state = MCState(
+        temperature=temperature,
+        energy=energy,
+        entropy=entropy,
+        enthalpy=enthalpy,
+        coherence=coherence,
+        personality=personality,
+        phase=phase,
+        response=response
+    )
+    
+    return [state]
 
 def save_plots(viz: MonteCarloVisualizer, experiment_name: str):
     """Save all plots to files"""
@@ -124,27 +149,17 @@ def main():
     
     print(f"Analysis complete. Generated {len(all_states)} total states")
     
-    # Sort states by temperature for better visualization
-    all_states.sort(key=lambda x: x.temperature)
-    
-    # Save states
-    states_data = [state.to_dict() for state in all_states]
-    with open('data/mock_states.json', 'w') as f:
-        json.dump(states_data, f, indent=2)
-    
-    # Initialize visualizer
+    # Create visualizer
     viz = MonteCarloVisualizer()
     
-    # Generate all plots with complete dataset
-    viz.plot_energy_landscape(all_states)
-    viz.plot_phase_distribution(all_states)
-    viz.plot_personality_space(all_states)
-    viz.plot_stability_metrics(all_states)
+    # Plot thermodynamic properties
+    viz.plot_thermodynamic_landscape(all_states)
     
-    # Save plots
-    for i, fig in enumerate(plt.get_fignums()):
-        plt.figure(fig)
-        plt.savefig(f'plots/plot_{i}.png')
+    # Plot phase stability
+    viz.plot_phase_stability(all_states)
+    
+    # Plot personality evolution
+    viz.plot_personality_evolution(all_states)
     
     # Show all plots
     viz.show_all_plots()
