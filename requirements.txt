@@ -1,0 +1,10 @@
+python-dotenv==1.0.0
+numpy>=1.21.0
+matplotlib>=3.4.0
+openai>=0.27.0
+spacy>=3.0.0
+tenacity>=8.0.0
+openai
+matplotlib
+pandas
+seaborn
