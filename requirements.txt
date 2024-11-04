@@ -8,3 +8,4 @@ openai
 matplotlib
 pandas
 seaborn
+scikit-learn

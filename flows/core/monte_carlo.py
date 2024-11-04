@@ -107,43 +107,51 @@ class MonteCarloAnalyzer:
             temperature_schedule = np.linspace(0.1, 2.0, n_steps)
             
         states = []
-        current_state = self._initialize_state(initial_personality, prompts[0])
-        states.append(current_state)
+        current_personality = initial_personality.copy()
         
-        # Calculate iterations needed for each temperature
-        steps_per_temp = n_steps // len(temperature_schedule)
-        
-        # Ensure we sample each temperature thoroughly
+        # Process each temperature point
         for temp in temperature_schedule:
-            # Multiple iterations at each temperature
-            for step in range(steps_per_temp):
-                # Process all prompts at this temperature
-                for prompt in prompts:
-                    # Generate response
-                    response = await self._process_single_prompt(
-                        prompt, 
-                        current_state.personality,
-                        temp
-                    )
+            # Initialize state for this temperature
+            current_state = MCState(
+                temperature=temp,  # Use current temperature from schedule
+                energy=0.0,
+                entropy=0.0,
+                enthalpy=0.0,
+                coherence=0.0,
+                personality=current_personality.copy(),
+                phase=self._determine_phase(temp, 0.0),
+                response=""
+            )
+            states.append(current_state)
+            
+            # Process all prompts at this temperature
+            for prompt in prompts:
+                # Generate response
+                response = await self._process_single_prompt(
+                    prompt, 
+                    current_personality,
+                    temp  # Use current temperature
+                )
+                
+                # Create and evaluate new state
+                proposed_state = self._create_state_from_response(
+                    response, 
+                    current_personality,
+                    temp,  # Use current temperature
+                    current_state
+                )
+                
+                if self._accept_state(
+                    proposed_state.energy - current_state.energy,
+                    temp
+                ):
+                    current_state = proposed_state
+                    current_personality = proposed_state.personality.copy()
                     
-                    # Create and evaluate new state
-                    proposed_state = self._create_state_from_response(
-                        response, 
-                        current_state.personality,
-                        temp,
-                        current_state
-                    )
-                    
-                    if self._accept_state(
-                        proposed_state.energy - current_state.energy,
-                        temp
-                    ):
-                        current_state = proposed_state
-                        
-                    states.append(current_state)
+                states.append(current_state)
 
         print(f"Generated {len(states)} states across {len(temperature_schedule)} temperatures")
-        return states
+        return states[1:]  # Skip the first empty state
 
     def _create_system_prompt(self, personality: Dict) -> str:
         """Convert personality dictionary to system prompt string"""

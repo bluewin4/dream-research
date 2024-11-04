@@ -3,13 +3,13 @@ import numpy as np
 from .personality_sampling import PersonalitySpaceSampling
 from .thermodynamics import PersonalityThermodynamics
 from .llm_client import LLMClient
+from ..personality_generator import PersonalityGenerator
+from flows.core.personality_sampling import PersonalityMatrix
 
 class PersonalityDreams:
     def __init__(self, 
                  base_temperature: float = 0.7, 
                  max_temperature: float = 2.0,
-                 base_personality: Dict = None,
-                 trait_pools: Dict = None,
                  llm: LLMClient = None):
         """Initialize PersonalityDreams with necessary components"""
         self.base_temp = base_temperature
@@ -18,54 +18,40 @@ class PersonalityDreams:
         
         # Initialize personality sampler and thermodynamics
         self.personality_sampler = PersonalitySpaceSampling(
-            base_personality=base_personality,
-            trait_pools=trait_pools
+            base_personality=None,
+            trait_pools=None
         )
         self.thermodynamics = PersonalityThermodynamics()
+        self.personality_generator = PersonalityGenerator(self.thermodynamics)
         
-    async def generate_dream_sequence(self, personality: Dict, prompt: str, steps: int = 5) -> List[Dict]:
-        """Generate a sequence of increasingly abstract responses as temperature increases"""
-        
-        # Generate temperature gradient
+    async def generate_dream_sequence(self, 
+                                    initial_personality: PersonalityMatrix,
+                                    prompt: str,
+                                    steps: int = 5) -> List[Dict]:
+        """Generate dream sequence with evolving personalities"""
         temperatures = np.linspace(self.base_temp, self.max_temp, steps)
         dream_sequence = []
-        current_personality = personality
+        current_personality = initial_personality
         
         for temp in temperatures:
-            # Generate dream at current temperature
-            response = await self._generate_dream(current_personality, prompt, temp)
-            
-            # Calculate thermodynamic metrics
-            coherence = self.thermodynamics._measure_coherence(response)
-            entropy = self.thermodynamics._calculate_entropy(response)
-            energy = self.thermodynamics.calculate_energy(response, temp)
-            enthalpy = -np.log(coherence)  # From thermodynamics calculation
-            
-            # Determine phase based on coherence
-            phase = self._determine_phase(coherence, temp)
-            
-            # Store current state
-            current_state = {
-                'temperature': temp,
-                'energy': energy,
-                'entropy': entropy,
-                'enthalpy': enthalpy,
-                'coherence': coherence,
-                'personality': current_personality,
-                'phase': phase,
-                'response': response
-            }
-            dream_sequence.append(current_state)
-            
-            # Evolve personality based on current state
-            current_personality = self.personality_sampler._generate_variation(
+            # Generate variation of personality at current temperature
+            evolved_personality = self.personality_generator.generate(
                 temperature=temp,
-                current_personality=current_personality,
-                metrics=current_state
+                bias=self._get_bias_from_personality(current_personality)
             )
             
-            # Use previous dream as context for next iteration
-            prompt = self._create_next_prompt(response)
+            # Generate dream response
+            response = await self._generate_dream(evolved_personality, prompt, temp)
+            
+            # Calculate metrics
+            state = self._calculate_dream_state(
+                response=response,
+                personality=evolved_personality,
+                temperature=temp
+            )
+            dream_sequence.append(state)
+            
+            current_personality = evolved_personality
             
         return dream_sequence
 

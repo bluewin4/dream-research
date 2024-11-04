@@ -1,9 +1,9 @@
 {
-    "n_samples": 5,
+    "n_samples": 3,
     "temp_range": [0.1, 2.0],
     "prompts": [
         "Tell me about yourself"
     ],
-    "n_steps": 4,
+    "n_steps": 2,
     "batch_size": 5
 } 

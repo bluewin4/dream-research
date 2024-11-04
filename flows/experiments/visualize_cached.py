@@ -9,6 +9,7 @@ from flows.core.monte_carlo import MCState
 from flows.core.personality_matrix import PersonalityMatrix
 from typing import List
 import random
+import asyncio
 
 class DataManager:
     def __init__(self, data_dir: str = "data"):
@@ -129,7 +130,7 @@ def save_plots(viz: MonteCarloVisualizer, experiment_name: str):
         fig.savefig(filepath)
         print(f"Saved plot to {filepath}")
 
-def main():
+async def main():
     # Ensure output directories exist
     Path("data").mkdir(exist_ok=True)
     Path("plots").mkdir(exist_ok=True)
@@ -159,10 +160,10 @@ def main():
     viz.plot_phase_stability(all_states)
     
     # Plot personality evolution
-    viz.plot_personality_evolution(all_states)
+    await viz.plot_personality_evolution(all_states)
     
     # Show all plots
     viz.show_all_plots()
 
 if __name__ == "__main__":
-    main() 
+    asyncio.run(main()) 

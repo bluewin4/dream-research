@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
 from flows.core.monte_carlo import MCState
+from flows.core.personality_embeddings import PersonalityEmbeddingLibrary
 
 class MonteCarloVisualizer:
     def __init__(self):
@@ -9,6 +10,7 @@ class MonteCarloVisualizer:
             plt.style.use('seaborn-v0_8')
         except:
             plt.style.use('default')
+        self.embedding_library = PersonalityEmbeddingLibrary()
             
     def plot_thermodynamic_landscape(self, states: List[MCState]):
         """Plot comprehensive thermodynamic landscape"""
@@ -83,29 +85,62 @@ class MonteCarloVisualizer:
         
         plt.tight_layout()
         
-    def plot_personality_evolution(self, states: List[MCState]):
+    async def plot_personality_evolution(self, states: List[MCState]):
         """Plot personality vector evolution"""
-        fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection='3d')
+        # Create two subplots: 3D trajectory and similarity matrix
+        fig = plt.figure(figsize=(15, 6))
+        
+        # 3D Trajectory plot
+        ax1 = fig.add_subplot(121, projection='3d')
         
         # Extract personality vectors with semantic encoding
         vectors = []
         for state in states:
-            vec = self._encode_personality_state(state.personality)
+            vec = await self._encode_personality_state(state.personality)
             vectors.append(vec)
         
         vectors = np.array(vectors)
         temperatures = np.array([s.temperature for s in states])
         
-        scatter = ax.scatter(vectors[:, 0], vectors[:, 1], vectors[:, 2],
+        # Plot trajectory with lines connecting points
+        scatter = ax1.scatter(vectors[:, 0], vectors[:, 1], vectors[:, 2],
                            c=temperatures, cmap='viridis',
-                           alpha=0.6)
+                           alpha=0.8, s=50)
         
-        ax.set_xlabel('Self Image (I_S)')
-        ax.set_ylabel('Goals (I_G)')
-        ax.set_zlabel('Worldview (I_W)')
+        # Add lines to show evolution trajectory
+        ax1.plot(vectors[:, 0], vectors[:, 1], vectors[:, 2],
+                 'r-', alpha=0.3, linewidth=1)
+        
+        ax1.set_xlabel('Personality Component 1')
+        ax1.set_ylabel('Personality Component 2')
+        ax1.set_zlabel('Personality Component 3')
+        
+        # Add colorbar for temperature
         plt.colorbar(scatter, label='Temperature')
-        plt.title('Personality Evolution in Phase Space')
+        
+        # Similarity matrix plot
+        ax2 = fig.add_subplot(122)
+        
+        # Compute similarity matrix
+        n_samples = len(vectors)
+        similarity_matrix = np.zeros((n_samples, n_samples))
+        for i in range(n_samples):
+            for j in range(n_samples):
+                similarity_matrix[i, j] = self.embedding_library.compute_similarity(vectors[i], vectors[j])
+        
+        # Plot similarity matrix
+        im = ax2.imshow(similarity_matrix, cmap='RdYlBu', aspect='auto')
+        plt.colorbar(im, label='Cosine Similarity')
+        ax2.set_title('Personality State Similarities')
+        ax2.set_xlabel('State Index')
+        ax2.set_ylabel('State Index')
+        
+        fig.suptitle('Personality Evolution Analysis', y=1.05)
+        plt.tight_layout()
+        
+    async def _encode_personality_state(self, personality: Dict) -> np.ndarray:
+        """Encode personality dictionary into a 3D vector using pre-computed embeddings"""
+        return await self.embedding_library.compute_personality_vector(personality)
         
     def show_all_plots(self):
         """Display all visualization plots"""

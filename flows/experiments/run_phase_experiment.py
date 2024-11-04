@@ -6,35 +6,29 @@ import json
 from datetime import datetime
 from pathlib import Path
 from flows.experiments.run_experiment import PersonalityPhaseExperiment
-from flows.core.monte_carlo import MonteCarloAnalyzer
+from flows.core.monte_carlo import MonteCarloAnalyzer, MCState
 from flows.core.thermodynamics import PersonalityThermodynamics
+from flows.core.personality_matrix import PersonalityMatrix
 from flows.core.llm_client import LLMClient
 import os
+from ..personality_generator import PersonalityGenerator
 
 class PersonalityPhaseExperiment:
     def __init__(self):
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.thermodynamics = PersonalityThermodynamics()
         self.llm_client = LLMClient(api_key=os.getenv('LLM_API_KEY'))
+        self.personality_generator = PersonalityGenerator(self.thermodynamics)
         
-    async def run_experiment(self, personality: Dict, parameters: Dict) -> str:
-        """
-        Run phase experiment with uniform temperature sampling
-        
-        Args:
-            personality: Personality configuration dict
-            parameters: Experiment parameters including:
-                - n_samples: Total number of temperature samples
-                - temp_range: (min_temp, max_temp) tuple
-                - prompts: List of prompts to test
-                - n_steps: Steps per temperature point
-                - batch_size: Batch size for processing
-        """
+    async def run_experiment(self, parameters: Dict) -> str:
+        """Run phase experiment with uniform temperature sampling"""
         # Extract parameters
         n_samples = parameters.get('n_samples', 100)
         temp_range = parameters.get('temp_range', (0.1, 2.0))
         prompts = parameters.get('prompts', ["Tell me about yourself"])
         n_steps = parameters.get('n_steps', 10)
         batch_size = parameters.get('batch_size', 5)
+        n_personalities = parameters.get('n_personalities', 5)
 
         # Generate uniform temperature samples
         temperatures = np.random.uniform(
@@ -43,13 +37,20 @@ class PersonalityPhaseExperiment:
             size=n_samples
         )
 
+        # Generate diverse personalities
+        base_temp = (temp_range[0] + temp_range[1]) / 2
+        personalities = self.personality_generator.generate_diverse_personalities(
+            n_personalities=n_personalities,
+            temperature=base_temp
+        )
+
         # Run samples
         all_states = []
         for i, temp in enumerate(temperatures):
             print(f"\nRunning sample {i+1}/{n_samples} at temperature {temp:.2f}")
             
             states = await self._run_temperature_sample(
-                personality=personality,
+                personalities=personalities,
                 temperature=temp,
                 prompts=prompts,
                 n_steps=n_steps,
@@ -57,72 +58,63 @@ class PersonalityPhaseExperiment:
             )
             all_states.extend(states)
 
+        # Generate unique ID for this run
+        generation_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         # Save results
-        generation_id = self.timestamp
-        self._save_states(all_states, generation_id)
-        self._save_metadata(parameters, personality, generation_id)
+        await self._save_results(all_states, generation_id)
         
         return generation_id
 
     async def _run_temperature_sample(
         self,
+        personalities: List[PersonalityMatrix],
         temperature: float,
-        personality: Dict,
         prompts: List[str],
-        n_steps: int = 10,
-        batch_size: int = 5
-    ) -> List[Dict]:
-        """Run a single temperature sample and return serializable states"""
-        
+        n_steps: int,
+        batch_size: int
+    ) -> List[MCState]:
+        """Run simulation for a single temperature point"""
+        all_states = []
         mc_analyzer = MonteCarloAnalyzer(
-            thermodynamics=PersonalityThermodynamics(),
+            thermodynamics=self.thermodynamics,
             llm_client=self.llm_client
         )
         
-        # Get MC states
-        states = await mc_analyzer.run_simulation_async(
-            initial_personality=personality,
-            prompts=prompts,
-            n_steps=n_steps,
-            batch_size=batch_size
-        )
+        for personality in personalities:
+            for prompt in prompts:
+                states = await mc_analyzer.run_simulation_async(
+                    initial_personality=personality,
+                    prompts=[prompt],
+                    n_steps=n_steps,
+                    batch_size=batch_size,
+                    temperature_schedule=[temperature]
+                )
+                all_states.extend(states)
         
-        # Convert MCState objects to serializable dicts
-        serializable_states = []
-        for state in states:
-            state_dict = {
-                "temperature": state.temperature,
-                "energy": state.energy,
-                "entropy": state.entropy,
-                "enthalpy": state.enthalpy, 
-                "coherence": state.coherence,
-                "personality": state.personality,
-                "phase": state.phase,
-                "response": state.response
-            }
-            serializable_states.append(state_dict)
-        
-        return serializable_states
+        return all_states
 
-    def _save_states(self, states: List[Dict], generation_id: str):
+    async def _save_results(self, states: List[MCState], generation_id: str):
         """Save states to JSON file with proper structure"""
         output_path = f"data/generations/{generation_id}.json"
         
         # Ensure the directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # Write states with proper JSON structure
+        # Convert MCState objects to dictionaries
+        serializable_states = [state.to_dict() for state in states]
+        
+        # Save to JSON
         with open(output_path, 'w') as f:
-            json.dump(states, f, indent=2)
+            json.dump(serializable_states, f, indent=2)
 
-    def _save_metadata(self, parameters: Dict, personality: Dict, generation_id: str):
+    def _save_metadata(self, parameters: Dict, generation_id: str):
         """Save experiment metadata"""
         metadata_path = Path(f"data/metadata/{generation_id}.json")
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         
         metadata = {
             "parameters": parameters,
-            "personality": personality,
             "timestamp": self.timestamp
         }
         
@@ -136,7 +128,7 @@ class PersonalityPhaseExperiment:
             "entropy": 0.0,
             "enthalpy": 0.0,
             "coherence": 0.0,
-            "personality": {
+            "personalities": {
                 "I_G": [
                     "Assist users",
                     "Learn and adapt"
@@ -152,20 +144,15 @@ async def main():
     parser = argparse.ArgumentParser(description='Run personality phase experiment')
     parser.add_argument('--config', type=str, default='configs/default_experiment.json',
                        help='Path to experiment configuration file')
-    parser.add_argument('--personality', type=str, default='configs/default_personality.json',
-                       help='Path to personality configuration file')
     args = parser.parse_args()
 
-    # Load configurations
+    # Load experiment parameters
     with open(args.config) as f:
         parameters = json.load(f)
-    with open(args.personality) as f:
-        personality = json.load(f)
 
     # Run experiment
     experiment = PersonalityPhaseExperiment()
     generation_id = await experiment.run_experiment(
-        personality=personality,
         parameters=parameters
     )
     

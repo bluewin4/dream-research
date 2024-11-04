@@ -6,11 +6,14 @@ from ..core.thermodynamics import PersonalityThermodynamics
 from pathlib import Path
 import json
 from datetime import datetime
+from ..personality_generator import PersonalityGenerator
+from flows.core.personality_sampling import PersonalityMatrix
 
 class PersonalityPhaseExperiment:
     def __init__(self):
         self.thermodynamics = PersonalityThermodynamics()
         self.mc_analyzer = MonteCarloAnalyzer(self.thermodynamics)
+        self.personality_generator = PersonalityGenerator(self.thermodynamics)
         self.results_dir = Path("results")
         self.results_dir.mkdir(exist_ok=True)
         
@@ -196,3 +199,26 @@ class PersonalityPhaseExperiment:
             else:
                 processed[key] = value
         return processed 
+    
+    def generate_diverse_personalities(self, n_personalities: int, temperature: float = 0.7) -> List[PersonalityMatrix]:
+        """Generate diverse personalities using the generator"""
+        personalities = []
+        
+        # Use different bias weights to encourage diversity
+        biases = [
+            {"analytical": 0.9, "creative": 0.4},  # Analytical bias
+            {"creative": 0.9, "social": 0.4},      # Creative bias
+            {"social": 0.9, "practical": 0.4},     # Social bias
+            {"practical": 0.9, "analytical": 0.4}, # Practical bias
+            {"analytical": 0.6, "creative": 0.6}   # Balanced
+        ]
+        
+        for i in range(n_personalities):
+            bias = biases[i % len(biases)]
+            personality = self.personality_generator.generate(
+                temperature=temperature,
+                bias=bias
+            )
+            personalities.append(personality)
+            
+        return personalities

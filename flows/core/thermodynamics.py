@@ -52,7 +52,8 @@ class PersonalityThermodynamics:
         entropy = self._calculate_entropy(response)
         
         # Calculate free energy components
-        enthalpy = -np.log(coherence)  # Higher coherence = lower enthalpy
+        epsilon = 1e-10  # Small number to prevent log(0)
+        enthalpy = -np.log(coherence + epsilon)  # Higher coherence = lower enthalpy
         entropy_term = temperature * entropy
         
         # Gibbs free energy equation: G = H - TS
