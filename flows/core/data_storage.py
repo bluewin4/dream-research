@@ -23,13 +23,15 @@ class DataStorage:
     def save_generation(self, 
                        data: List[Dict[str, Any]], 
                        parameters: Dict[str, Any],
-                       experiment_name: str) -> str:
+                       experiment_name: str,
+                       model_info: Dict[str, Any] = None) -> str:
         """Save generation data and parameters
         
         Args:
             data: List of dictionaries containing generation results
             parameters: Dictionary of generation parameters
             experiment_name: Name of the experiment
+            model_info: Dictionary containing model information
             
         Returns:
             generation_id: Unique identifier for this generation
@@ -52,7 +54,8 @@ class DataStorage:
             "experiment_name": experiment_name,
             "columns": list(df.columns),
             "n_samples": len(df),
-            "data_path": str(data_path)
+            "data_path": str(data_path),
+            "model": model_info or {}  # Add model information
         }
         
         metadata_path = self.metadata_dir / f"{generation_id}.json"

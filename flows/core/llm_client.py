@@ -1,116 +1,106 @@
-from typing import List, Optional
 from openai import AsyncOpenAI
+from typing import Optional, Dict, Any, List
+import os
+from tenacity import retry, stop_after_attempt, wait_exponential
 import asyncio
-import json
-from pathlib import Path
-from functools import lru_cache
 
 class LLMClient:
-    def __init__(self, api_key: str = None, model: str = "gpt-3.5-turbo", max_tokens: int = 150):
-        self.client = AsyncOpenAI(api_key=api_key)
-        self.model = model
-        self.max_tokens = max_tokens
-        self.cache = {}
-        self.cache_file = Path("llm_cache.json")
-        self.cache = self._load_cache()
+    """Asynchronous OpenAI client wrapper with retry logic"""
+    
+    def __init__(self, api_key: Optional[str] = None, 
+                 max_retries: int = 3,
+                 retry_delay: float = 1.0):
+        """Initialize the LLM client
         
-    def _load_cache(self) -> dict:
-        """Load cached responses from file"""
-        if self.cache_file.exists():
-            return json.loads(self.cache_file.read_text())
-        return {}
+        Args:
+            api_key: Optional API key. If not provided, will use OPENAI_API_KEY env variable
+            max_retries: Maximum number of retry attempts
+            retry_delay: Delay between retry attempts in seconds
+        """
+        self.client = AsyncOpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.default_model = "gpt-4"
         
-    def _save_cache(self):
-        """Save cache to file"""
-        self.cache_file.write_text(json.dumps(self.cache, indent=2))
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 100,
+        model: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """Generate a response asynchronously with retry logic
         
-    def _get_cache_key(self, prompt: str, system_prompt: str, temperature: float) -> str:
-        """Generate cache key with temperature bucketing"""
-        temp_bucket = round(temperature * 2) / 2  # Rounds to nearest 0.5
-        return f"{prompt}:{system_prompt}:{temp_bucket}"
-        
-    async def _generate(self, prompt: str, system_prompt: str, temperature: float, max_tokens: int) -> str:
-        """Make the actual API call"""
-        try:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
+        Args:
+            prompt: The user prompt
+            system_prompt: Optional system prompt to set context/personality
+            temperature: Sampling temperature (0.0 to 2.0)
+            max_tokens: Maximum tokens in response
+            model: Model to use (defaults to gpt-4)
+            **kwargs: Additional parameters to pass to the API
             
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens if max_tokens else self.max_tokens
-            )
+        Returns:
+            Generated text response
+        """
+        attempt = 0
+        while attempt < self.max_retries:
+            try:
+                messages: List[Dict[str, str]] = []
+                
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                    
+                messages.append({"role": "user", "content": prompt})
+                
+                response = await self.client.chat.completions.create(
+                    model=model or self.default_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs
+                )
+                return response.choices[0].message.content
+
+            except Exception as e:
+                attempt += 1
+                if attempt >= self.max_retries:
+                    print(f"Final error in generate after {attempt} attempts: {str(e)}")
+                    return f"Error: {str(e)}"
+                else:
+                    print(f"Attempt {attempt} failed: {str(e)}. Retrying in {self.retry_delay} seconds...")
+                    await asyncio.sleep(self.retry_delay * attempt)  # Exponential backoff
+
+    async def generate_batch(
+        self,
+        prompts: List[str],
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        **kwargs
+    ) -> List[str]:
+        """Generate multiple responses asynchronously
+        
+        Args:
+            prompts: List of prompts to process
+            system_prompt: Optional system prompt applied to all generations
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens per response
+            **kwargs: Additional parameters to pass to the API
             
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            print(f"Error in LLM generation: {str(e)}")
-            return ""
-        
-    async def generate(self, prompt: str, system_prompt: str = None, temperature: float = 0.7, max_tokens: int = None) -> str:
-        """Generate response using the LLM"""
-        cache_key = self._get_cache_key(prompt, system_prompt, temperature)
-        
-        # Check cache first
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-            
-        # If not in cache, generate response
-        response = await self._generate(prompt, system_prompt, temperature, max_tokens)
-        
-        # Cache the response
-        self.cache[cache_key] = response
-        self._save_cache()
-        
-        return response
-        
-    async def _generate_cached(self, prompt: str, system_prompt: str, temperature: float, max_tokens: int) -> str:
-        """Generate with caching"""
-        cache_key = self._create_cache_key(prompt, system_prompt, temperature, max_tokens)
-        
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-            
-        response = await self._generate(prompt, system_prompt, temperature, max_tokens)
-        self.cache[cache_key] = response
-        return response
-        
-    async def generate_async(self, prompt: str, system_prompt: str = None,
-                           temperature: float = 0.7, max_tokens: int = 100) -> str:
-        """Async generation method"""
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
-        response = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-        
-        return response.choices[0].message.content
-        
-    def batch_generate(self, prompts: List[str], system_prompt: str = None,
-                      batch_size: int = 5) -> List[str]:
-        """Generate multiple responses in batches"""
-        responses = []
-        for i in range(0, len(prompts), batch_size):
-            batch = prompts[i:i + batch_size]
-            # Process batch using async
-            batch_responses = asyncio.run(self._process_batch(batch, system_prompt))
-            responses.extend(batch_responses)
-        return responses
-        
-    async def _process_batch(self, prompts: List[str], 
-                           system_prompt: str = None) -> List[str]:
-        """Process a batch of prompts concurrently"""
+        Returns:
+            List of generated responses
+        """
         tasks = [
-            self.generate_async(prompt, system_prompt)
+            self.generate(
+                prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
             for prompt in prompts
         ]
-        return await asyncio.gather(*tasks)
+        
+        return await asyncio.gather(*tasks, return_exceptions=True)

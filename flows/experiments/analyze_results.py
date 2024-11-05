@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import List
 import pandas as pd
+from flows.core.monte_carlo import MCState
+from flows.visualization.phase_separation_viz import PhaseSeparationVisualizer
 
 class ResultAnalyzer:
     def __init__(self):
@@ -18,20 +20,28 @@ class ResultAnalyzer:
         for key, value in metadata["parameters"].items():
             print(f"{key}: {value}")
             
-        # Create visualizations
-        plt.figure(figsize=(12, 8))
+        # Convert DataFrame to MCState objects
+        states = [
+            MCState(
+                temperature=row['temperature'],
+                energy=row['energy'],
+                entropy=row.get('entropy', 0),
+                enthalpy=row.get('enthalpy', 0),
+                coherence=row.get('coherence', 0),
+                phase=row['phase'],
+                personality=row.get('personality', {}),
+                response=row.get('response', '')
+            ) for _, row in df.iterrows()
+        ]
         
-        # Energy vs Temperature plot
-        plt.subplot(2, 1, 1)
-        sns.scatterplot(data=df, x="temperature", y="energy")
-        plt.title("Energy vs Temperature")
+        # Initialize visualizer
+        viz = PhaseSeparationVisualizer()
         
-        # Phase distribution
-        plt.subplot(2, 1, 2)
-        sns.countplot(data=df, x="phase")
-        plt.title("Phase Distribution")
+        # Create and show all visualizations
+        viz.plot_phase_separation(states)
+        viz.plot_free_energy_landscape(states)
+        viz.plot_phase_stability_matrix(states)
         
-        plt.tight_layout()
         plt.show()
         
     def compare_experiments(self, generation_ids: List[str]):

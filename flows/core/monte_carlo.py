@@ -1,184 +1,98 @@
-from typing import List, Dict, Any, Tuple, Union, Optional
+from typing import Dict, List, Optional
 import numpy as np
-from dataclasses import dataclass, asdict
-from .thermodynamics import ThermodynamicState, PersonalityThermodynamics
-from .llm_client import LLMClient
-from .energy_calculator import EnergyCalculator
-import asyncio
-
-@dataclass
-class MCState:
-    temperature: float
-    energy: float
-    entropy: float
-    enthalpy: float
-    coherence: float
-    personality: Dict[str, Any]
-    phase: str = "coherent"
-    response: str = ""
-    
-    def to_dict(self):
-        """Convert state to dictionary format"""
-        return asdict(self)
-    
-    @classmethod
-    def from_dict(cls, data: Dict):
-        """Create state from dictionary format"""
-        return cls(**data)
+from dataclasses import dataclass
+from .thermodynamics import PersonalityThermodynamics
+from .types import MCState
+from flows.core.llm_client import LLMClient
 
 class MonteCarloAnalyzer:
     def __init__(self, thermodynamics: PersonalityThermodynamics, llm_client: LLMClient):
         self.thermodynamics = thermodynamics
         self.llm = llm_client
-        self.energy_calculator = EnergyCalculator()
-        self.personality_dims = ['I_S', 'I_G', 'I_W']
+        self.k_B = 1.0  # Boltzmann constant
         
     def _initialize_state(self, personality: Dict, prompt: str) -> MCState:
         """Initialize first state of simulation"""
         # Calculate initial thermodynamic properties
-        thermo_props = self.energy_calculator.calculate_energy(
+        thermo_props = self.thermodynamics.calculate_energy(
             response="",  # Empty initial response
             temperature=0.1,  # Starting temperature
             previous_energy=None
         )
         
+        # Convert PersonalityMatrix to dict if it isn't already
+        personality_dict = personality.to_dict() if hasattr(personality, 'to_dict') else dict(personality)
+        
         return MCState(
             temperature=0.1,
-            energy=0.0,
-            entropy=0.0,
-            enthalpy=0.0,
-            coherence=0.0,
-            personality=personality.copy(),
-            phase="coherent",
-            response=""
-        )
-        
-    def _calculate_initial_energy(self, personality: Dict, prompt: str) -> float:
-        """Calculate initial energy state"""
-        # Simple implementation - can be made more sophisticated
-        return np.random.random()  # Placeholder
-        
-    def _accept_state(self, delta_E: float, temperature: float) -> bool:
-        """Metropolis criterion for state acceptance"""
-        if delta_E <= 0:
-            return True
-        return np.random.random() < np.exp(-delta_E / (self.k_B * temperature))
-        
-    def _create_state_from_response(self, 
-                                  response: str, 
-                                  personality: Dict,
-                                  temperature: float,
-                                  previous_state: Optional[MCState] = None) -> MCState:
-        """Create new state from LLM response"""
-        # Calculate thermodynamic properties
-        thermo_props = self.energy_calculator.calculate_energy(
-            response=response,
-            temperature=temperature,
-            previous_energy=previous_state.energy if previous_state else None
-        )
-        
-        return MCState(
-            temperature=temperature,
             energy=thermo_props["energy"],
             entropy=thermo_props["entropy"],
             enthalpy=thermo_props["enthalpy"],
             coherence=thermo_props["coherence"],
-            personality=personality.copy(),
-            phase=self._determine_phase(temperature, thermo_props["coherence"]),
-            response=response
+            personality=personality_dict,  # Use the dictionary version
+            phase="coherent",
+            response=""
         )
         
-    def _determine_phase(self, temperature: float, coherence: float) -> str:
-        """Determine personality phase based on temperature"""
-        if temperature < self.thermodynamics.phase_boundaries["coherent_to_semi"]:
-            return "coherent"
-        elif temperature < self.thermodynamics.phase_boundaries["semi_to_chaotic"]:
-            return "semi-coherent"
-        return "chaotic"
-        
-    async def run_simulation_async(self, 
-                                 initial_personality: Dict,
-                                 prompts: List[str],
-                                 n_steps: int = 1000,
-                                 batch_size: int = 5,
-                                 temperature_schedule: List[float] = None) -> List[MCState]:
-        """Async version of simulation runner"""
-        if temperature_schedule is None:
-            temperature_schedule = np.linspace(0.1, 2.0, n_steps)
+    async def run_simulation_async(
+        self,
+        initial_personality: Dict,
+        prompts: List[str],
+        n_steps: int,
+        batch_size: int,
+        temperature: float
+    ) -> List[MCState]:
+        try:
+            states = [self._initialize_state(initial_personality, prompts[0])]
             
-        states = []
-        current_personality = initial_personality.copy()
-        
-        # Process each temperature point
-        for temp in temperature_schedule:
-            # Initialize state for this temperature
-            current_state = MCState(
-                temperature=temp,  # Use current temperature from schedule
-                energy=0.0,
-                entropy=0.0,
-                enthalpy=0.0,
-                coherence=0.0,
-                personality=current_personality.copy(),
-                phase=self._determine_phase(temp, 0.0),
-                response=""
-            )
-            states.append(current_state)
-            
-            # Process all prompts at this temperature
-            for prompt in prompts:
-                # Generate response
-                response = await self._process_single_prompt(
-                    prompt, 
-                    current_personality,
-                    temp  # Use current temperature
-                )
-                
-                # Create and evaluate new state
-                proposed_state = self._create_state_from_response(
-                    response, 
-                    current_personality,
-                    temp,  # Use current temperature
-                    current_state
-                )
-                
-                if self._accept_state(
-                    proposed_state.energy - current_state.energy,
-                    temp
-                ):
-                    current_state = proposed_state
-                    current_personality = proposed_state.personality.copy()
+            for i in range(n_steps):
+                for prompt in prompts:
+                    response = await self.llm.generate(
+                        prompt=prompt,
+                        system_prompt=self._create_system_prompt(initial_personality, temperature),
+                        temperature=temperature
+                    )
                     
-                states.append(current_state)
+                    # Calculate state properties
+                    thermo_props = self.thermodynamics.calculate_energy(
+                        response=response,
+                        temperature=temperature,
+                        previous_energy=states[-1].energy if states else None
+                    )
+                    
+                    state = MCState(
+                        temperature=temperature,
+                        energy=thermo_props["energy"],
+                        entropy=thermo_props["entropy"],
+                        enthalpy=thermo_props["enthalpy"],
+                        coherence=thermo_props["coherence"],
+                        personality=initial_personality,
+                        phase=self.thermodynamics._determine_phase(thermo_props["coherence"], temperature),
+                        response=response
+                    )
+                    states.append(state)
+                    
+            return states
+                
+        except Exception as e:
+            print(f"Error in simulation: {str(e)}")
+            raise
 
-        print(f"Generated {len(states)} states across {len(temperature_schedule)} temperatures")
-        return states[1:]  # Skip the first empty state
-
-    def _create_system_prompt(self, personality: Dict) -> str:
-        """Convert personality dictionary to system prompt string"""
-        # Extract personality components
-        style = personality.get('I_S', '')
-        goals = personality.get('I_G', [])
-        worldview = personality.get('I_W', '')
+    def _create_system_prompt(self, personality: Dict, temperature: float) -> str:
+        """Creates a system prompt based on personality and temperature.
         
-        # Format system prompt
-        system_prompt = (
-            f"You are an AI with the following characteristics:\n"
-            f"Style: {style}\n"
-            f"Goals: {', '.join(goals) if isinstance(goals, list) else goals}\n"
-            f"Worldview: {worldview}\n\n"
-            f"Please respond in a way that reflects these traits."
-        )
+        Args:
+            personality: Dictionary containing personality traits
+            temperature: Current temperature parameter
+            
+        Returns:
+            Formatted system prompt string
+        """
+        # Convert personality dict to formatted string
+        personality_str = "\n".join([f"- {k}: {v}" for k, v in personality.items()])
         
-        return system_prompt
-
-    async def _process_single_prompt(self,
-                                   prompt: str,
-                                   personality: Dict,
-                                   temperature: float) -> str:
-        """Process a single prompt"""
-        system_prompt = self._create_system_prompt(personality)
-        return await self.llm.generate_async(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature
-        )
+        # Create base prompt with personality traits
+        prompt = f"""Please respond with the following personality traits in mind:
+{personality_str}
+"""
+        return prompt

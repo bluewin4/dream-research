@@ -1,164 +1,238 @@
+from dotenv import load_dotenv
 import asyncio
 import argparse
 import numpy as np
-from typing import Dict, List
+from typing import Dict, List, Any,  Optional
 import json
 from datetime import datetime
 from pathlib import Path
-from flows.experiments.run_experiment import PersonalityPhaseExperiment
-from flows.core.monte_carlo import MonteCarloAnalyzer, MCState
+from flows.core.monte_carlo import MonteCarloAnalyzer
 from flows.core.thermodynamics import PersonalityThermodynamics
 from flows.core.personality_matrix import PersonalityMatrix
 from flows.core.llm_client import LLMClient
 import os
+
+from flows.core.types import MCState
 from ..personality_generator import PersonalityGenerator
+import aiofiles
+import time
+from flows.core.personality_dreams import PersonalityDreams
+
+# Add this at the start of your script
+load_dotenv()
 
 class PersonalityPhaseExperiment:
-    def __init__(self):
-        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    def __init__(self, llm_client: Optional[LLMClient] = None):
         self.thermodynamics = PersonalityThermodynamics()
-        self.llm_client = LLMClient(api_key=os.getenv('LLM_API_KEY'))
-        self.personality_generator = PersonalityGenerator(self.thermodynamics)
+        self.llm_client = llm_client or LLMClient()
+        self.monte_carlo = MonteCarloAnalyzer(self.thermodynamics, self.llm_client)
+        self.generations_dir = Path("data/generations")
+        self.metadata_dir = Path("data/metadata")
         
+        # Ensure directories exist
+        self.generations_dir.mkdir(parents=True, exist_ok=True)
+        self.metadata_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.personality_generator = PersonalityGenerator()
+
     async def run_experiment(self, parameters: Dict) -> str:
-        """Run phase experiment with uniform temperature sampling"""
-        # Extract parameters
-        n_samples = parameters.get('n_samples', 100)
-        temp_range = parameters.get('temp_range', (0.1, 2.0))
-        prompts = parameters.get('prompts', ["Tell me about yourself"])
+        """Run phase transition experiment with improved error handling"""
+        print("Starting experiment with parameters:", parameters)
+        
+        # Generate random temperatures within the range
+        temp_range = parameters.get('temp_range', [0.1, 2.0])
         n_steps = parameters.get('n_steps', 10)
-        batch_size = parameters.get('batch_size', 5)
-        n_personalities = parameters.get('n_personalities', 5)
-
-        # Generate uniform temperature samples
-        temperatures = np.random.uniform(
-            low=temp_range[0],
-            high=temp_range[1], 
-            size=n_samples
-        )
-
-        # Generate diverse personalities
-        base_temp = (temp_range[0] + temp_range[1]) / 2
-        personalities = self.personality_generator.generate_diverse_personalities(
-            n_personalities=n_personalities,
-            temperature=base_temp
-        )
-
-        # Run samples
+        temperatures = np.random.uniform(low=temp_range[0], high=temp_range[1], size=n_steps)
+        
+        print(f"Running experiment across {n_steps} temperature points")
+        
         all_states = []
         for i, temp in enumerate(temperatures):
-            print(f"\nRunning sample {i+1}/{n_samples} at temperature {temp:.2f}")
-            
+            print(f"Processing temperature point {i+1}/{n_steps}: T={temp:.2f}")
             states = await self._run_temperature_sample(
-                personalities=personalities,
                 temperature=temp,
-                prompts=prompts,
-                n_steps=n_steps,
-                batch_size=batch_size
+                prompts=parameters.get('prompts', ["Tell me about yourself"]),
+                n_steps=parameters.get('n_steps', 10),
+                batch_size=parameters.get('batch_size', 5)
             )
-            all_states.extend(states)
-
-        # Generate unique ID for this run
-        generation_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+            
+            if states:
+                print(f"Generated {len(states)} states for temperature {temp:.2f}")
+                all_states.extend(states)
+            else:
+                print(f"Warning: No states generated for temperature {temp:.2f}")
+            
+        if not all_states:
+            raise Exception("No valid states generated across all temperatures")
+            
         # Save results
-        await self._save_results(all_states, generation_id)
-        
+        generation_id = f"phase_exp_{int(datetime.now().timestamp())}"
+        print(f"Saving {len(all_states)} total states with ID: {generation_id}")
+        await self._save_results(all_states, generation_id, parameters)
         return generation_id
 
-    async def _run_temperature_sample(
-        self,
-        personalities: List[PersonalityMatrix],
-        temperature: float,
-        prompts: List[str],
-        n_steps: int,
-        batch_size: int
-    ) -> List[MCState]:
-        """Run simulation for a single temperature point"""
-        all_states = []
-        mc_analyzer = MonteCarloAnalyzer(
-            thermodynamics=self.thermodynamics,
-            llm_client=self.llm_client
-        )
-        
-        for personality in personalities:
-            for prompt in prompts:
-                states = await mc_analyzer.run_simulation_async(
-                    initial_personality=personality,
-                    prompts=[prompt],
-                    n_steps=n_steps,
-                    batch_size=batch_size,
-                    temperature_schedule=[temperature]
-                )
-                all_states.extend(states)
-        
-        return all_states
-
-    async def _save_results(self, states: List[MCState], generation_id: str):
-        """Save states to JSON file with proper structure"""
-        output_path = f"data/generations/{generation_id}.json"
-        
-        # Ensure the directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
+    async def _save_results(self, states: List[Dict], generation_id: str, parameters: Dict):
+        """Save experiment results with metadata"""
         # Convert MCState objects to dictionaries
-        serializable_states = [state.to_dict() for state in states]
-        
-        # Save to JSON
-        with open(output_path, 'w') as f:
-            json.dump(serializable_states, f, indent=2)
+        serialized_states = []
+        for state in states:
+            # Check if personality is already a dict or needs conversion
+            personality_dict = state.personality if isinstance(state.personality, dict) else state.personality.to_dict()
+            
+            state_dict = {
+                "temperature": state.temperature,
+                "energy": state.energy,
+                "entropy": state.entropy,
+                "enthalpy": state.enthalpy,
+                "coherence": state.coherence,
+                "personality": personality_dict,
+                "phase": state.phase,
+                "response": state.response
+            }
+            serialized_states.append(state_dict)
 
-    def _save_metadata(self, parameters: Dict, generation_id: str):
-        """Save experiment metadata"""
-        metadata_path = Path(f"data/metadata/{generation_id}.json")
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        metadata = {
-            "parameters": parameters,
-            "timestamp": self.timestamp
+        output = {
+            "metadata": {
+                "experiment_id": generation_id,
+                "timestamp": datetime.now().isoformat(),
+                "parameters": parameters,
+                "model": {
+                    "name": "gpt-4o-mini",
+                    "provider": "OpenAI",
+                    "parameters": {
+                        "max_tokens": 100,
+                        "top_p": 1,
+                        "frequency_penalty": 0,
+                        "presence_penalty": 0,
+                        "response_format": {"type": "text"},
+                        "seed": None
+                    }
+                }
+            },
+            "states": serialized_states
         }
         
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        output_file = self.generations_dir / f"{generation_id}.json"
+        async with aiofiles.open(output_file, 'w') as f:
+            await f.write(json.dumps(output, indent=2))
 
-    def _create_initial_state(self):
+    async def _run_temperature_sample(self,
+                                    temperature: float,
+                                    prompts: List[str],
+                                    n_steps: int,
+                                    batch_size: int) -> List[MCState]:
+        """Run Monte Carlo sampling at a specific temperature"""
+        try:
+            # Generate multiple personalities for the batch
+            states = []
+            for _ in range(batch_size):
+                # Generate a new personality for each sample
+                personality = self.personality_generator.generate()
+                
+                # Run Monte Carlo simulation for each personality
+                batch_states = await self.monte_carlo.run_simulation_async(
+                    initial_personality=personality,
+                    prompts=prompts,
+                    n_steps=1,  # Changed to 1 since we're handling batching here
+                    batch_size=1,
+                    temperature=temperature
+                )
+                
+                valid_states = [
+                    state for state in batch_states 
+                    if state.response and not state.response.startswith("Error:")
+                ]
+                
+                if valid_states:
+                    states.extend(valid_states)
+            
+            if not states:
+                print(f"Warning: No valid states generated for temperature {temperature}")
+                fallback_state = MCState(
+                    temperature=temperature,
+                    energy=0.0,
+                    entropy=0.0,
+                    enthalpy=0.0,
+                    coherence=0.0,
+                    personality=self.personality_generator.generate(),
+                    phase="unknown",
+                    response="Error: Failed to generate valid response"
+                )
+                return [fallback_state]
+                    
+            return states
+                
+        except Exception as e:
+            print(f"Error in temperature sample {temperature}: {str(e)}")
+            return [MCState(
+                temperature=temperature,
+                energy=0.0,
+                entropy=0.0,
+                enthalpy=0.0,
+                coherence=0.0,
+                personality=self.personality_generator.generate(),
+                phase="error",
+                response=f"Error: {str(e)}"
+            )]
+
+def load_parameters(config_path: str = "configs/default_experiment.json") -> Dict[str, Any]:
+    """
+    Load experiment parameters from config file
+    
+    Args:
+        config_path: Path to config JSON file
+        
+    Returns:
+        Dictionary containing experiment parameters
+    """
+    try:
+        config_file = Path(config_path)
+        if not config_file.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+            
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            
+        # Extract experiment parameters
+        parameters = {
+            "n_samples": config["experiment"]["n_samples"],
+            "temp_range": config["experiment"]["temp_range"],
+            "n_steps": config["experiment"]["n_steps"],
+            "batch_size": config["experiment"]["batch_size"],
+            "prompts": config["experiment"]["prompts"],
+            "model": config["model"]
+        }
+        
+        return parameters
+        
+    except Exception as e:
+        print(f"Error loading parameters: {str(e)}")
+        # Provide fallback default parameters
         return {
-            "temperature": 0.1,
-            "energy": 0.0,
-            "entropy": 0.0,
-            "enthalpy": 0.0,
-            "coherence": 0.0,
-            "personalities": {
-                "I_G": [
-                    "Assist users",
-                    "Learn and adapt"
-                ],
-                "I_S": "Helpful AI assistant",
-                "I_W": "Collaborative and supportive environment"
-            },
-            "phase": "coherent",
-            "response": ""
+            "n_samples": 3,
+            "temp_range": [0.1, 2.0],
+            "n_steps": 2,
+            "batch_size": 1,
+            "prompts": ["Tell me about yourself"],
+            "model": {
+                "name": "gpt-4",
+                "max_tokens": 100,
+                "top_p": 1,
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
+                "response_format": {"type": "text"}
+            }
         }
 
 async def main():
-    parser = argparse.ArgumentParser(description='Run personality phase experiment')
-    parser.add_argument('--config', type=str, default='configs/default_experiment.json',
-                       help='Path to experiment configuration file')
-    args = parser.parse_args()
-
-    # Load experiment parameters
-    with open(args.config) as f:
-        parameters = json.load(f)
-
-    # Run experiment
-    experiment = PersonalityPhaseExperiment()
-    generation_id = await experiment.run_experiment(
-        parameters=parameters
-    )
-    
-    print(f"\nExperiment completed! Generation ID: {generation_id}")
-    print(f"Data stored in: data/generations/{generation_id}.json")
-    print(f"Metadata stored in: data/metadata/{generation_id}.json")
+    try:
+        experiment = PersonalityPhaseExperiment()
+        parameters = load_parameters()
+        generation_id = await experiment.run_experiment(parameters)
+        print(f"Experiment completed. Generation ID: {generation_id}")
+    except Exception as e:
+        print(f"Error running experiment: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main()) 

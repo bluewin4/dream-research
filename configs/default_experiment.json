@@ -1,9 +1,20 @@
 {
-    "n_samples": 3,
-    "temp_range": [0.1, 2.0],
-    "prompts": [
-        "Tell me about yourself"
-    ],
-    "n_steps": 2,
-    "batch_size": 5
+    "experiment": {
+        "n_samples": 5,
+        "temp_range": [0.1, 2.0],
+        "n_steps": 100,
+        "batch_size": 5,
+        "prompts": [
+            "Tell me about yourself"
+        ]
+    },
+    "model": {
+        "name": "gpt-4o-mini",
+        "max_tokens": 100,
+        "top_p": 1,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "seed": null,
+        "response_format": { "type": "text" }
+    }
 } 

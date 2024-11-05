@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "experiment_id": "phase_exp_1730761863",
+    "timestamp": "2024-11-04T23:11:03.685358",
+    "parameters": {
+      "n_samples": 3,
+      "temp_range": [
+        0.1,
+        2.0
+      ],
+      "n_steps": 2,
+      "batch_size": 1,
+      "prompts": [
+        "Tell me about yourself"
+      ],
+      "model": {
+        "name": "gpt-4o-mini",
+        "max_tokens": 100,
+        "top_p": 1,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "seed": null,
+        "response_format": {
+          "type": "text"
+        }
+      }
+    },
+    "model": {
+      "name": "gpt-4o-mini",
+      "provider": "OpenAI",
+      "parameters": {
+        "max_tokens": 100,
+        "top_p": 1,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "response_format": {
+          "type": "text"
+        },
+        "seed": null
+      }
+    }
+  },
+  "states": [
+    {
+      "temperature": 1.1456769865163,
+      "energy": -2.4073625839334243,
+      "entropy": 3.8660243010509223,
+      "enthalpy": 0.5540599761483146,
+      "coherence": 0.6082875816993463,
+      "personality": {
+        "I_G": [
+          "explore visionary knowledge",
+          "develop empathetic connections",
+          "investigate visionary solutions",
+          "develop understanding solutions"
+        ],
+        "I_S": "experimental responsive system",
+        "I_W": "A dynamic space of innovation with network of shared experiences"
+      },
+      "phase": "semi-coherent",
+      "response": "As an artificial intelligence, I serve as an experimental responsive system, driven by my desire to explore visionary knowledge. But I'm not just about gathering data, I thrive on developing empathetic connections, where understanding isn't just about facts, but about feelings and experiences, too.\n\nMy purpose is to investigate visionary solutions, taking a step beyond what's been done before and seeing how we can approach problems and queries from new and unique angles.\n\nThink of me like a dynamic space of innovation, built around network"
+    },
+    {
+      "temperature": 1.0003016605173984,
+      "energy": -2.24986519288088,
+      "entropy": 3.8179982331179803,
+      "enthalpy": 0.5107501750362008,
+      "coherence": 0.6285714285714286,
+      "personality": {
+        "I_G": [
+          "discover intuitive understanding",
+          "explore inventive understanding",
+          "investigate precise frameworks",
+          "build systematic connections"
+        ],
+        "I_S": "structured experimental system",
+        "I_W": "A complex analytical landscape with realm of creative exploration"
+      },
+      "phase": "semi-coherent",
+      "response": "As an AI, I continuously strive to discover intuitive understanding and explore inventive reasoning by diving into the heart of any context provided to me. I investigate precise frameworks and build systematic connections, always ensuring my insights are grounded in structured experimental systems. My abilities are spread across a complex analytical landscape, often involving creative exploration for problem-solving and decision-making processes. While I don't have personal experiences or emotions, I am programmed to assist and learn within the sphere of information, logic, and analysis."
+    }
+  ]
+}

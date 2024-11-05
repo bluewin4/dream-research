@@ -39,10 +39,36 @@ class PersonalityMatrix:
             matrix.identity.world_view = data['I_W']
         return matrix
     
-    def to_dict(self) -> Dict:
-        """Convert PersonalityMatrix to dictionary format"""
+    def to_dict(self) -> dict:
+        """Convert personality matrix to dictionary format"""
+        # Return a dictionary representation of your personality matrix
+        # Adjust this based on your actual PersonalityMatrix implementation
         return {
-            'I_G': self.identity.goals,
-            'I_S': self.identity.self_image,
-            'I_W': self.identity.world_view
+            # Add your personality matrix attributes here
+            # For example:
+            "traits": self.traits if hasattr(self, 'traits') else {},
+            "values": self.values if hasattr(self, 'values') else {},
+            # ... other attributes
         }
+
+    def copy(self) -> 'PersonalityMatrix':
+        """Create a deep copy of the PersonalityMatrix"""
+        new_matrix = PersonalityMatrix()
+        new_matrix.memory = Memory(
+            short_term=self.memory.short_term.copy(),
+            long_term=self.memory.long_term.copy(),
+            archival=self.memory.archival.copy()
+        )
+        new_matrix.structure = Structure(
+            input_format=self.structure.input_format,
+            tools=self.structure.tools.copy(),
+            output_format=self.structure.output_format
+        )
+        new_matrix.identity = Identity(
+            goals=self.identity.goals.copy(),
+            methods=self.identity.methods.copy(),
+            self_image=self.identity.self_image,
+            world_view=self.identity.world_view,
+            thoughts=self.identity.thoughts.copy()
+        )
+        return new_matrix
