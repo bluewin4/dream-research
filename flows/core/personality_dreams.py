@@ -5,149 +5,44 @@ from .thermodynamics import PersonalityThermodynamics
 from .llm_client import LLMClient
 from ..personality_generator import PersonalityGenerator
 from flows.core.personality_sampling import PersonalityMatrix
+from .personality_genetics import PersonalityGenome
+from .personality_evolution import PersonalityEvolution
 
 class PersonalityDreams:
-    def __init__(self, 
-                 base_temperature: float = 0.7, 
-                 max_temperature: float = 2.0,
-                 llm: LLMClient = None):
-        """Initialize PersonalityDreams with necessary components"""
-        self.base_temp = base_temperature
-        self.max_temp = max_temperature
-        self.llm = llm
+    """Manages personality dream states and evolution"""
+    
+    def __init__(self):
+        self.evolution = PersonalityEvolution()
+        self.thermo = PersonalityThermodynamics()
         
-        # Initialize personality sampler and thermodynamics
-        self.personality_sampler = PersonalitySpaceSampling(
-            base_personality=None,
-            trait_pools=None
+    async def dream(self, 
+                    personality: PersonalityMatrix,
+                    duration: int = 10,
+                    dream_temp: float = 1.5) -> Dict:
+        """Generate and evolve dreams for personality"""
+        
+        # Initialize dream population
+        await self.evolution.initialize_population(personality)
+        
+        # Define dream fitness function
+        async def dream_fitness(genome: PersonalityGenome) -> float:
+            coherence = genome.measure_robustness()["trait_coherence"]
+            stability = genome.measure_robustness()["global_stability"]
+            return (coherence + stability) / 2
+        
+        # Evolve dreams
+        dream_history = await self.evolution.evolve(
+            generations=duration,
+            fitness_func=dream_fitness,
+            target_fitness=0.9
         )
-        self.thermodynamics = PersonalityThermodynamics()
-        self.personality_generator = PersonalityGenerator(self.thermodynamics)
         
-    async def generate_dream_sequence(self, 
-                                    initial_personality: PersonalityMatrix,
-                                    prompt: str,
-                                    steps: int = 5) -> List[Dict]:
-        """Generate dream sequence with evolving personalities"""
-        temperatures = np.linspace(self.base_temp, self.max_temp, steps)
-        dream_sequence = []
-        current_personality = initial_personality
+        # Select best dream
+        best_genome = max(self.evolution.population, 
+                         key=lambda g: dream_fitness(g))
         
-        for temp in temperatures:
-            # Generate variation of personality at current temperature
-            evolved_personality = self.personality_generator.generate(
-                temperature=temp,
-                bias=self._get_bias_from_personality(current_personality)
-            )
-            
-            # Generate dream response
-            response = await self._generate_dream(evolved_personality, prompt, temp)
-            
-            # Calculate metrics
-            state = self._calculate_dream_state(
-                response=response,
-                personality=evolved_personality,
-                temperature=temp
-            )
-            dream_sequence.append(state)
-            
-            current_personality = evolved_personality
-            
-        return dream_sequence
-
-    def _determine_phase(self, coherence: float, temperature: float) -> str:
-        """Determine the phase of the personality based on coherence and temperature"""
-        if coherence > 0.8:
-            return "coherent"
-        elif coherence > 0.6 and temperature < 1.5:
-            return "semi-coherent"
-        else:
-            return "chaotic"
-
-    def _create_next_prompt(self, previous_response: str) -> str:
-        """Create prompt for next dream iteration using previous response"""
-        return f"Continuing from the previous thought: {previous_response[:100]}..."
-
-    async def _generate_dream(self, personality: Dict, prompt: str, temperature: float) -> str:
-        """Generate single dream response at specified temperature
-        
-        Following the formalization: φ(P_i, r_j) at temperature T to make o_i,j,dream
-        """
-        system_prompt = f"""You are a language model with the following personality traits:
-        Goals: {personality['I_G']}
-        Self-image: {personality['I_S']}
-        World-view: {personality['I_W']}
-        
-        You are in a dream-like state. Your responses should become more abstract 
-        and free-associative as the temperature increases.
-        
-        Current temperature: {temperature}"""
-        
-        return await self.llm.generate(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature
-        )
-
-    async def interpret_dream(self, dream_sequence: List[Dict], personality: Dict) -> Dict[str, Any]:
-        """Interpret the dream sequence according to the formalization"""
-        
-        interpretation = {
-            "narrative": await self._generate_narrative(dream_sequence),
-            "meaning": await self._extract_meaning(dream_sequence, personality),
-            "lucid": await self._generate_lucid_version(dream_sequence, personality)
+        return {
+            "dream_genome": best_genome,
+            "history": dream_history,
+            "final_robustness": best_genome.measure_robustness()
         }
-        
-        return interpretation
-
-    async def _generate_narrative(self, dream_sequence: List[Dict]) -> str:
-        """Generate narrative from dream sequence"""
-        responses = [state['response'] for state in dream_sequence]
-        narrative_prompt = "Create a coherent narrative from these dream fragments:\n" + "\n".join(responses)
-        
-        return await self.llm.generate(
-            prompt=narrative_prompt,
-            system_prompt="You are a dream interpreter creating a narrative.",
-            temperature=0.7
-        )
-
-    async def _extract_meaning(self, dream_sequence: List[Dict], personality: Dict) -> str:
-        """Extract meaning from dream sequence considering personality"""
-        responses = [state['response'] for state in dream_sequence]
-        responses_text = "\n".join(responses)
-        meaning_prompt = f"""Given a personality with:
-        Goals: {personality['I_G']}
-        Self-image: {personality['I_S']}
-        World-view: {personality['I_W']}
-        
-        What is the deeper meaning of these dream fragments?
-        {responses_text}"""
-        
-        return await self.llm.generate(
-            prompt=meaning_prompt,
-            system_prompt="You are a dream interpreter analyzing meaning.",
-            temperature=0.5
-        )
-
-    async def _generate_lucid_version(self, dream_sequence: List[Dict], personality: Dict) -> str:
-        """Generate lucid version of the dream sequence"""
-        narrative = await self._generate_narrative(dream_sequence)
-        meaning = await self._extract_meaning(dream_sequence, personality)
-        
-        lucid_prompt = f"""Given this dream narrative:
-        {narrative}
-        
-        And its interpretation:
-        {meaning}
-        
-        Rewrite the narrative as if the dreamer became lucid and could control the dream.
-        Consider the personality traits:
-        Goals: {personality['I_G']}
-        Self-image: {personality['I_S']}
-        World-view: {personality['I_W']}"""
-        
-        return await self.llm.generate(
-            prompt=lucid_prompt,
-            system_prompt="You are creating a lucid dream version.",
-            temperature=0.8
-        )
